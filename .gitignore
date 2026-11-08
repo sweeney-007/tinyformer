@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+runs/
+out/
+*.pt
+runs_log.txt
+.DS_Store
+.ipynb_checkpoints/

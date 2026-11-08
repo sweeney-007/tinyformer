@@ -1,0 +1,5 @@
+# Core: the only runtime dependency.
+torch>=2.1
+# Optional: charts from experiments.py, and the test suite.
+matplotlib
+pytest

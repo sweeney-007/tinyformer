@@ -67,7 +67,7 @@ No GPU? Use the [Colab notebook](notebooks/train_colab.ipynb) (free T4).
 
 Every comparison changes **one thing** and measures **validation bits per
 character**. Unlike per-token loss, this metric can be compared across
-different tokenizers. Full method and caveats: [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
+different tokenizers.
 
 ```bash
 python prepare.py --input data/pycode_bpe/input.txt --out data/pycode_char --tokenizer char
@@ -113,8 +113,7 @@ What stands out:
   token embeddings. Scaling them to match fixed it (1.98).
 
 These are short, single-seed runs on a tiny model: a starting point, not a
-final verdict. See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) for caveats
-and the longer runs to do next.
+final verdict.
 
 Sample after 600 steps (RoPE model, prompt `    def __init__(self`):
 
@@ -134,9 +133,7 @@ docstrings, `self.` and `return`.
 ## Documentation
 
 - [Design notes](docs/DESIGN.md): why each component is built the way it is
-- [Experiments](docs/EXPERIMENTS.md): method, hypotheses and more experiments to run
 - [Training guide](docs/TRAINING_GUIDE.md): hardware options, datasets and problems small models are good at
-- [Roadmap](docs/ROADMAP.md): planned features (contributions welcome)
 
 ## References
 

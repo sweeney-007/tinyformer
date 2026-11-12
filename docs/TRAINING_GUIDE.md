@@ -4,7 +4,7 @@
 
 | Where | Cost | Good for | Notes |
 |---|---|---|---|
-| **Your Mac** (CPU or Apple/AMD GPU via MPS) | free | development, tests, `tiny` preset (≈1M params), experiments of a few thousand steps | On an Intel iMac the Radeon GPU was 2.5× faster than the CPU. |
+| **Mac** (CPU or Apple/AMD GPU via MPS) | free | development, tests, `tiny` preset (≈1M params), experiments of a few thousand steps | On an Intel iMac the Radeon GPU was 2.5× faster than the CPU. |
 | **Google Colab** (free T4 GPU) | free | `small` preset (≈11M params), 5–10k steps | Sessions stop after a few hours of use. Save checkpoints to Google Drive. |
 | **Kaggle Notebooks** (free T4 ×2 or P100) | free, about 30 GPU-hours per week | longer runs and multi-seed experiment suites | Upload the prepared `data/` folder as a Kaggle dataset. |
 | **Lightning AI Studios** | free monthly credits | a VS Code-like setup with a GPU | |

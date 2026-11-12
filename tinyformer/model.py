@@ -235,7 +235,7 @@ class GPT(nn.Module):
         elif cfg.pos_encoding == "sinusoidal":
             # Scaled to match the token embeddings (std 0.02). Unscaled, the
             # waves (size ~1) drown out the tokens and training stalls: we
-            # measured 2.88 bits/char vs 1.98 (docs/EXPERIMENTS.md). The 2017
+            # measured 2.88 bits/char vs 1.98. The 2017
             # paper solves the same problem by multiplying embeddings by sqrt(C).
             table = sinusoidal_table(cfg.block_size, cfg.n_embd) * 0.02
             self.register_buffer("pos_table", table, persistent=False)

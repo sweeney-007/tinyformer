@@ -23,6 +23,43 @@ text ─► BPE tokenizer ─► token ids ─► [embedding + position]
                               norm → linear → next-token probabilities
 ```
 
+## Why this matters
+
+Training a frontier model costs tens of millions of dollars, so almost every
+design decision is made on small models first and then extrapolated:
+which tokenizer, which positional encoding, what learning rate, dense or
+mixture-of-experts. That only works if the small-scale experiments are
+controlled (one change at a time, same data, several seeds) and if their
+conclusions carry over to bigger models. tinyformer runs those experiments
+at a scale anyone can reproduce, with every line of the model visible, so
+the reasons behind today's standard architecture can be checked rather
+than taken on trust.
+
+The experiments follow recent research:
+
+- **Architecture:** the components that won here, rotary positions
+  ([RoPE](https://arxiv.org/abs/2104.09864)) and gated MLPs
+  ([SwiGLU](https://arxiv.org/abs/2002.05202)), are the ones Llama, Qwen and
+  Mistral use.
+- **Hyperparameter transfer:** [µP](https://arxiv.org/abs/2203.03466) lets a
+  learning rate tuned on a small model be reused on a large one.
+  [Cerebras-GPT](https://arxiv.org/abs/2304.03208) adopted it, and the
+  [GPT-4 report](https://arxiv.org/abs/2303.08774) describes predicting a
+  large run's loss from much smaller ones. Here the transfer is measured
+  directly, including where it falls short.
+- **Scaling laws:** the dense-vs-MoE ladder trains every model on about 20
+  tokens per parameter, the compute-optimal ratio from
+  [Chinchilla](https://arxiv.org/abs/2203.15556), and fits power laws as in
+  [Kaplan et al.](https://arxiv.org/abs/2001.08361)
+- **Mixture of experts:** many of the strongest recent open models are sparse
+  ([Switch](https://arxiv.org/abs/2101.03961),
+  [Mixtral](https://arxiv.org/abs/2401.04088),
+  [DeepSeek-V3](https://arxiv.org/abs/2412.19437)). The ladder reproduces
+  their main claim (more quality per FLOP) and also the practical catch:
+  without fused expert kernels such as
+  [MegaBlocks](https://arxiv.org/abs/2211.15841), the FLOP savings do not
+  show up as wall-clock savings.
+
 ## What's inside
 
 | File | What it does |

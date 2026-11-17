@@ -84,4 +84,4 @@ the `tiny` preset (≈1M parameters) and 200 steps:
 
 Both reached the same loss. `--device auto` picks CUDA, then MPS, then CPU.
 PyTorch 2.2.2 is the last version for Intel Macs, so the code supports
-Python 3.8+.
+Python 3.9+ (CI tests 3.10 and 3.12).

@@ -5,7 +5,8 @@
 
 **A GPT-style transformer and a byte-level BPE tokenizer, built from scratch
 in Python and raw PyTorch, plus a small lab for controlled experiments on
-what each part contributes.**
+what each part contributes, and µP and mixture-of-experts scaling
+experiments on cloud GPUs.**
 
 No Hugging Face, no `tiktoken`, no `nn.Transformer`. Attention, masking,
 normalization, positional encodings, the tokenizer and sampling are all
@@ -27,12 +28,15 @@ text ─► BPE tokenizer ─► token ids ─► [embedding + position]
 | File | What it does |
 |---|---|
 | [`tinyformer/tokenizer.py`](tinyformer/tokenizer.py) | Byte-level BPE (GPT-2 style) with fast incremental training, a character tokenizer baseline, JSON save/load |
-| [`tinyformer/model.py`](tinyformer/model.py) | Decoder-only transformer with swappable parts: learned / sinusoidal / RoPE / no positions, LayerNorm / RMSNorm, pre / post norm, GELU / ReLU / SwiGLU, tied / untied output |
+| [`tinyformer/model.py`](tinyformer/model.py) | Decoder-only transformer with swappable parts: learned / sinusoidal / RoPE / no positions, LayerNorm / RMSNorm, pre / post norm, GELU / ReLU / SwiGLU, tied / untied output; µP (maximal update parametrization); top-k mixture-of-experts MLP with load balancing and expert capacity |
 | [`prepare.py`](prepare.py) | Trains a tokenizer and encodes a dataset |
-| [`train.py`](train.py) | AdamW, warmup + cosine schedule, gradient clipping, mixed precision on CUDA, checkpoints, bits-per-character logging |
+| [`train.py`](train.py) | AdamW, warmup + cosine schedule, gradient clipping, mixed precision on CUDA, `torch.compile`, multi-GPU (DDP), memory-mapped token files, checkpoints, bits-per-character, throughput and MFU logging |
 | [`sample.py`](sample.py) | Text generation with temperature, top-k and top-p, single prompt or interactive |
 | [`experiments.py`](experiments.py) | Runs controlled comparisons across seeds and writes a results table and chart |
-| [`tests/`](tests/) | 24 tests, e.g. the causal mask hides the future, the fast BPE trainer matches the textbook algorithm, RoPE depends only on relative position |
+| [`coord_check.py`](coord_check.py) | µP coordinate check: do activations stay the same size as the model gets wider? |
+| [`prepare_code.py`](prepare_code.py) | Builds a large Python corpus from permissively licensed GitHub repositories |
+| [`scaling.py`](scaling.py), [`modal_app.py`](modal_app.py) | Learning-rate transfer and scaling-ladder sweeps on cloud GPUs ([Modal](https://modal.com)), and their analysis |
+| [`tests/`](tests/) | 40 tests, e.g. the causal mask hides the future, the fast BPE trainer matches the textbook algorithm, RoPE depends only on relative position |
 
 ## Quickstart
 
@@ -130,6 +134,76 @@ Sample after 600 steps (RoPE model, prompt `    def __init__(self`):
 It's not correct code yet, but after 2.5 minutes it has learned indentation,
 docstrings, `self.` and `return`.
 
+## µP and mixture-of-experts at scale
+
+The second set of experiments asks two questions that matter when training
+larger models: **can the learning rate be tuned on a small model and reused
+on a big one?** and **does a mixture-of-experts MLP beat a dense one at the
+same compute?**
+
+- **µP** ([Yang et al.](https://arxiv.org/abs/2203.03466)) changes how
+  initialization, learning rates and output scale depend on width, so that
+  the best hyperparameters at a small width should stay best at a large one.
+- **MoE**: 8 experts, each token routed to the top 2, with a load-balancing
+  loss and an expert capacity of 1.25. Each expert is half the size of the
+  dense MLP, so the weights used per token match the dense model.
+- **Corpus:** 547M tokens of Python from permissively licensed GitHub
+  repositories (`codeparrot/github-code-clean`; MIT, Apache-2.0, BSD, ISC,
+  CC0, Unlicense), split by repository so no repository is in both train
+  and validation. BPE tokenizer with 4,096 tokens.
+- **Model family:** 6 layers, 64-dimensional heads, context 256, RoPE +
+  RMSNorm + SwiGLU, trained on NVIDIA L4 GPUs.
+
+### Coordinate check
+
+A few Adam steps at one learning rate, widths 64 to 1024 (3 seeds). Under
+the standard parametrization the last block's output grows about **550×**
+across a 16× wider model; under µP it stays flat, for both dense and MoE.
+
+![coordinate check](docs/results/coord_check.png)
+
+### Learning-rate transfer
+
+112 runs: widths 128, 256, 512 and 1024, learning rates 2^-12 to 2^-6,
+standard vs µP, dense vs MoE, 16M tokens each, on NVIDIA L4s.
+
+| MLP | Parametrization | best LR, width 128 | 256 | 512 | 1024 | shift, 128 → 1024 |
+|---|---|---|---|---|---|---|
+| dense | standard | 2^-7.40 | 2^-8.43 | 2^-9.56 | 2^-10.50 | **−3.09** |
+| dense | µP | 2^-7.48 | 2^-7.45 | 2^-7.83 | 2^-7.40 | **+0.08** |
+| MoE | standard | 2^-7.61 | 2^-8.66 | 2^-9.81 | 2^-10.79 | **−3.18** |
+| MoE | µP | 2^-7.51 | 2^-7.39 | 2^-7.40 | 2^-7.50 | **+0.01** |
+
+![learning-rate transfer](docs/results/lr_transfer.png)
+
+What stands out:
+- **The learning rate transfers under µP.** With the standard
+  parametrization the best learning rate falls about 8× as the model gets
+  8× wider; under µP it stays within a fraction of a grid step, for dense
+  and MoE alike.
+- **But transfer is not the same as the best result.** At width 1024 the
+  tuned standard model reaches **1.100** bits/char and the best µP model
+  **1.173**. Under µP, wider models improve less than they should. Likely
+  causes: µP's other constants (initialization scale, output multiplier)
+  were left at defaults instead of being tuned at the base width, and 16M
+  tokens is a short run. This is the next thing to test.
+- **A compiler bug the runs caught:** in PyTorch 2.5, multiplying a matmul
+  result by a Python float (the µP output multiplier) crashed
+  `torch.compile`. Scaling the input of the linear layer instead gives the
+  same result and avoids it.
+- Two L4 GPUs with DDP ran **2.0×** as fast as one.
+
+Full tables: [docs/results/lr_transfer.md](docs/results/lr_transfer.md).
+A dense-vs-MoE scaling ladder (5 widths, 3 seeds, µP at the learning rate
+found here) is running; its results will be added here.
+
+```bash
+python coord_check.py --data data/pycode_bpe              # CPU, a few minutes
+modal run modal_app.py::prepare --shards 60               # build the corpus (CPU only)
+modal run --detach modal_app.py::sweep --phase lr
+modal volume get tinyformer-runs lr runs/ && python scaling.py analyze --runs runs --phase lr
+```
+
 ## Documentation
 
 - [Design notes](docs/DESIGN.md): why each component is built the way it is
@@ -144,6 +218,8 @@ docstrings, `self.` and `return`.
 - Shazeer, 2020. *GLU Variants Improve Transformer* (SwiGLU)
 - Zhang & Sennrich, 2019. *Root Mean Square Layer Normalization*
 - Xiong et al., 2020. *On Layer Normalization in the Transformer Architecture* (pre vs post norm)
+- Yang et al., 2022. *Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer* (µP)
+- Shazeer et al., 2017; Fedus et al., 2021. *Outrageously Large Neural Networks*; *Switch Transformers* (mixture of experts)
 - Andrej Karpathy's nanoGPT and minbpe, which inspired the project's scope
 
 ## License

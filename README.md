@@ -194,14 +194,52 @@ What stands out:
 - Two L4 GPUs with DDP ran **2.0×** as fast as one.
 
 Full tables: [docs/results/lr_transfer.md](docs/results/lr_transfer.md).
-A dense-vs-MoE scaling ladder (5 widths, 3 seeds, µP at the learning rate
-found here) is running; its results will be added here.
+
+### Scaling ladder: dense vs mixture-of-experts
+
+30 runs: widths 128 to 512 (1.2M to 19M active parameters), dense and MoE,
+3 seeds each, µP with the learning rate from the transfer sweep, about 20
+training tokens per active parameter (24M to 377M tokens).
+
+| Width | Active params | Dense bits/char | MoE bits/char | MoE total params | MoE gain per FLOP | per GPU-second |
+|---|---|---|---|---|---|---|
+| 128 | 1.2M | 1.221 ± 0.002 | 1.197 ± 0.005 | 4.1M | 1.08× | 0.72× |
+| 192 | 2.7M | 1.064 ± 0.008 | 1.036 ± 0.003 | 8.8M | 1.60× | 1.04× |
+| 256 | 4.7M | 0.975 ± 0.002 | 0.948 ± 0.002 | 15.2M | 1.76× | 0.95× |
+| 384 | 10.6M | 0.880 ± 0.003 | 0.852 ± 0.001 | 33.4M | 1.53× | 0.96× |
+| 512 | 18.9M | 0.817 ± 0.002 | 0.795 ± 0.002 | 58.7M | 1.25× | 0.75× |
+
+"Gain" = how much more compute the dense model would need to reach the
+MoE model's loss (read off the dense power-law fit).
+
+![scaling ladder](docs/results/scaling_ladder.png)
+
+What stands out:
+- **MoE wins at every width at the same FLOPs:** 0.02 to 0.03 bits/char
+  lower, well outside the seed-to-seed noise. That is worth **1.1× to 1.8×
+  the training compute** of a dense model.
+- **Both follow a clean power law** (bits/char ≈ a · C^-b) with almost the
+  same exponent (dense 0.076, MoE 0.078), so the MoE advantage is a
+  constant offset here, not a steeper slope.
+- **On real hardware the gain disappears.** MoE runs 33 to 46% slower per
+  token (routing, gathering tokens per expert, small expert matmuls), so per
+  GPU-second it is 0.72× to 1.04× as efficient as dense. Getting the FLOP
+  advantage in wall-clock time needs fused, grouped expert kernels.
+- **Routing stayed balanced:** the busiest expert got 15 to 16% of tokens
+  (12.5% is perfectly even) and at most 0.05% of tokens were dropped by the
+  capacity limit.
+- **Seeds matter less than expected:** the standard deviation over 3 seeds
+  is at most 0.008 bits/char.
+
+Full tables: [docs/results/scaling_ladder.md](docs/results/scaling_ladder.md).
 
 ```bash
 python coord_check.py --data data/pycode_bpe              # CPU, a few minutes
 modal run modal_app.py::prepare --shards 60               # build the corpus (CPU only)
 modal run --detach modal_app.py::sweep --phase lr
 modal volume get tinyformer-runs lr runs/ && python scaling.py analyze --runs runs --phase lr
+modal run --detach modal_app.py::sweep --phase ladder --lr-dense 0.00538 --lr-moe 0.00572
+modal volume get tinyformer-runs ladder runs/ && python scaling.py analyze --runs runs --phase ladder
 ```
 
 ## Documentation
